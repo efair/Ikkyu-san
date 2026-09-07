@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>کارپوشه تجهیزات پزشکی</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body class="app-body">
+  <aside class="sidebar">
+    <div class="brand">
+      <p class="eyebrow">IMED Registry Desk</p>
+      <strong>کارپوشه داده</strong>
+    </div>
+    <nav id="nav"></nav>
+    <div class="sidebar-foot">
+      <p id="who" class="muted"></p>
+      <button type="button" id="logout" class="ghost">خروج</button>
+    </div>
+  </aside>
+
+  <main class="workspace">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow" id="crumb">نمای کلی</p>
+        <h1 id="title">داشبورد</h1>
+      </div>
+      <form id="search-form" class="search" hidden>
+        <input id="search" type="search" placeholder="جستجو در این دسته…">
+        <button type="submit">بگرد</button>
+      </form>
+    </header>
+    <section id="content" class="content"></section>
+  </main>
+
+  <aside id="drawer" class="drawer" hidden>
+    <div class="drawer-head">
+      <div>
+        <p class="eyebrow" id="drawer-kicker">جزئیات</p>
+        <h2 id="drawer-title">—</h2>
+      </div>
+      <button type="button" id="drawer-close" class="ghost">بستن</button>
+    </div>
+    <div id="drawer-body" class="drawer-body"></div>
+  </aside>
+  <div id="backdrop" class="backdrop" hidden></div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>

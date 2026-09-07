@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ورود به کارپوشه تجهیزات پزشکی</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body class="auth-body">
+  <main class="auth-card">
+    <p class="eyebrow">IMED Registry Desk</p>
+    <h1>کارپوشه داده</h1>
+    <p class="auth-lead">برای مشاهده گزارش‌های جمع‌آوری‌شده وارد شوید.</p>
+    <form id="login-form" autocomplete="username">
+      <label>
+        نام کاربری
+        <input name="username" type="text" required autofocus>
+      </label>
+      <label>
+        رمز عبور
+        <input name="password" type="password" required>
+      </label>
+      <p id="login-error" class="form-error" hidden></p>
+      <button type="submit">ورود</button>
+    </form>
+  </main>
+  <script>
+    const form = document.getElementById("login-form");
+    const errorEl = document.getElementById("login-error");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      errorEl.hidden = true;
+      const data = Object.fromEntries(new FormData(form).entries());
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        errorEl.textContent = body.error || "ورود ناموفق بود";
+        errorEl.hidden = false;
+        return;
+      }
+      location.href = "/";
+    });
+  </script>
+</body>
+</html>

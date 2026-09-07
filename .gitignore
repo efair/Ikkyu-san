@@ -1,0 +1,8 @@
+node_modules/
+data/
+*.log
+.env
+.env.*
+*.traineddata
+.DS_Store
+Thumbs.db
