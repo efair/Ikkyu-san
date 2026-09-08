@@ -396,7 +396,7 @@ async function main() {
   await store.init();
 
   const log = new Progress("srchconfirmed-foriati");
-  log.start("شرکت های واردکننده دارای نمایندگی تامین‌کننده مجاز");
+  log.start("شرکت های وارد کننده دارای نمایندگی تامین کننده مجاز در زمینه واردات تجهیزات و ملزومات پزشکی");
   console.log("MongoDB:", mongoUri);
 
   let names;

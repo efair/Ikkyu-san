@@ -396,7 +396,7 @@ async function main() {
   await store.init();
 
   const log = new Progress("srchconfirmed");
-  log.start("شرکت های مجاز واردات تجهیزات پزشکی");
+  log.start("شرکت های مجاز فعال در زمینه واردات تجهیزات و ملزومات پزشکی");
   console.log("MongoDB:", mongoUri);
 
   let names;
