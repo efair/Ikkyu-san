@@ -764,6 +764,12 @@
         <div>
           <strong>${escapeHtml(item.label)}</strong>
           <p class="muted">${escapeHtml(item.script)}</p>
+          ${
+            item.url
+              ? `<p class="worker-url"><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.pagePath || item.url)}</a></p>`
+              : ""
+          }
+          ${item.pageNote ? `<p class="muted">${escapeHtml(item.pageNote)}</p>` : ""}
         </div>
         ${badge(item.lastRun && item.lastRun.status, item.running, item.auditing)}
       </header>
@@ -842,10 +848,16 @@
       doc.running ? "در حال اجرا" : "گزارش ورکر",
       kv([
         ["اسکریپت", doc.script],
+        ["صفحه", doc.url ? undefined : doc.pagePath || "—"],
         ["رکورد محلی", fmtNum(doc.localCount)],
         ["شغل‌های انجام‌شده", `${fmtNum(doc.jobs.doneJobs)} / ${fmtNum(doc.jobs.recordedJobs)}`],
         ["PID", doc.pid],
       ]) +
+        (doc.url
+          ? `<p class="worker-url"><a href="${escapeHtml(doc.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(doc.url)}</a></p>${
+              doc.pageNote ? `<p class="muted">${escapeHtml(doc.pageNote)}</p>` : ""
+            }`
+          : "") +
         block("گزارش خطا", errors || "<p class='muted'>خطای ثبت‌شده‌ای نیست.</p>") +
         block("گزارش کار", logs || "<p class='muted'>لاگی نیست.</p>") +
         block("بررسی کامل‌بودن با سایت", audits || "<p class='muted'>هنوز بررسی نشده.</p>") +

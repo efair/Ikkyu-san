@@ -300,6 +300,17 @@ tr.clickable:hover { background: #f8f3e8; }
   align-items: start;
 }
 .worker-card header p { margin: 0.2rem 0 0; }
+.worker-url {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  word-break: break-all;
+}
+.worker-url a {
+  color: var(--pine);
+  text-decoration: none;
+}
+.worker-url a:hover { text-decoration: underline; }
 .worker-meta {
   display: flex;
   flex-wrap: wrap;
