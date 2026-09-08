@@ -366,21 +366,40 @@ async function scrapeName(store, session, worker, name, log, cache) {
   let companies = await fetchGridPages(session, html, PAGE_PATH, parseMasterRows, name);
   if (log) {
     log.setSection(`${name} | ${companies.length} شرکت`);
-    log.setDetected(companies.length, "شرکت");
-  }
-  for (const company of companies) {
-    await enrichCompany(session, company, cache, log);
-    if (log) log.tick(`${company.name} — ${company.cmpCode}`);
+    log.setDetected(Math.max(companies.length, 1), "شرکت");
   }
 
-  const result = await store.saveConfirmedImporterRows(companies, name);
+  let saved = 0;
+  let linked = 0;
+  if (!companies.length) {
+    if (log) log.tick(`${name}: بدون شرکت`);
+  }
+  for (const company of companies) {
+    try {
+      await enrichCompany(session, company, cache, log);
+      const result = await store.saveConfirmedImporterRows([company], name, SOURCE.CONFIRMED_IMPORT);
+      saved += result.saved || 0;
+      linked += result.linked || 0;
+      const totalUnique = await store.licenses.countDocuments({
+        source: SOURCE.CONFIRMED_IMPORT,
+      });
+      if (log) {
+        log.tick(`${company.name} — ${company.cmpCode} | یکتا=${totalUnique}`);
+        log.extra = `یکتای ذخیره‌شده ${totalUnique}`;
+        log.flush(true);
+      }
+    } catch (err) {
+      if (log) log.error(`${company.name || name}: ${err.message}`);
+    }
+  }
+
   await store.markJob(SOURCE.CONFIRMED_IMPORT, name, {
     done: true,
-    items: result.saved,
-    linked: result.linked,
+    items: saved,
+    linked,
     finishedAt: new Date(),
   });
-  return result;
+  return { saved, linked };
 }
 
 async function main() {
