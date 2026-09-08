@@ -22,11 +22,31 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function replyLookup(callback, options, address, family = 4) {
+  if (options && options.all) {
+    const list = Array.isArray(address)
+      ? address
+      : [{ address, family }];
+    return callback(null, list);
+  }
+  if (Array.isArray(address)) {
+    const first = address[0] || { address: FALLBACK_IP, family: 4 };
+    return callback(null, first.address, first.family || 4);
+  }
+  return callback(null, address, family);
+}
+
 function lookup(hostname, options, callback) {
+  if (typeof options === "function") {
+    callback = options;
+    options = {};
+  }
   if (hostname !== HOST) return dns.lookup(hostname, options, callback);
   dns.lookup(hostname, options, (err, address, family) => {
-    if (err || !address) return callback(null, FALLBACK_IP, 4);
-    callback(null, address, family);
+    if (err || !address || (Array.isArray(address) && !address.length)) {
+      return replyLookup(callback, options, FALLBACK_IP, 4);
+    }
+    return replyLookup(callback, options, address, family);
   });
 }
 
@@ -35,6 +55,7 @@ const agent = new https.Agent({
   rejectUnauthorized: false,
   servername: HOST,
   lookup,
+  autoSelectFamily: false,
 });
 
 function getHtml(urlPath) {
