@@ -769,11 +769,23 @@
       </header>
       <div class="worker-meta">
         <span>محلی: ${fmtNum(item.localCount)}</span>
-        <span>سایت: ${item.lastAudit && item.lastAudit.siteCount != null ? fmtNum(item.lastAudit.siteCount) : "—"}</span>
+        <span>سایت: ${
+          item.auditing && item.lastAudit && item.lastAudit.siteCountSoFar != null
+            ? fmtNum(item.lastAudit.siteCountSoFar) + "…"
+            : item.lastAudit && item.lastAudit.siteCount != null
+              ? fmtNum(item.lastAudit.siteCount)
+              : "—"
+        }</span>
         <span>وضعیت داده: ${verdictFa(item.lastAudit && item.lastAudit.verdict)}</span>
       </div>
       <div class="bar"><i style="width:${bar}%"></i></div>
-      <p class="muted">${escapeHtml(p.section || (item.lastAudit && item.lastAudit.section) || item.lastRun && item.lastRun.summary || "هنوز گزارشی نیست")}</p>
+      <p class="muted">${escapeHtml(
+        (item.auditing && item.lastAudit && item.lastAudit.section) ||
+          p.section ||
+          (item.lastAudit && item.lastAudit.section) ||
+          (item.lastRun && item.lastRun.summary) ||
+          "هنوز گزارشی نیست"
+      )}</p>
       ${p.lastItem ? `<p class="muted">الان: ${escapeHtml(p.lastItem)}</p>` : ""}
       ${p.lastError ? `<p class="form-error">${escapeHtml(p.lastError)}</p>` : ""}
       <div class="worker-actions">
@@ -794,14 +806,16 @@
       .map(
         (a) => `<div class="nest">
           <p><span class="badge ${a.verdict === "complete" ? "ok" : a.verdict === "incomplete" || a.verdict === "error" ? "err" : "wait"}">${verdictFa(a.verdict)}</span> ${escapeHtml(a.note || "")}</p>
+          <p class="muted">${escapeHtml(a.section || "")}</p>
           <p class="muted">محلی ${fmtNum(a.localCount)} — سایت ${a.siteCount == null ? "—" : fmtNum(a.siteCount)} — ${escapeHtml(a.method || "")}</p>
           ${
             a.samples && a.samples.length
               ? miniTable(
                   [
-                    ["name", "نمونه"],
+                    ["name", "فیلد"],
                     ["siteCount", "سایت"],
-                    ["localCount", "محلی"],
+                    ["pageCount", "صفحه"],
+                    ["lastPageRows", "ردیف آخر"],
                   ],
                   a.samples
                 )
