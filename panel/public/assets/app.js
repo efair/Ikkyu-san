@@ -774,8 +774,8 @@
         ${badge(item.lastRun && item.lastRun.status, item.running, item.auditing)}
       </header>
       <div class="worker-meta">
-        <span>محلی: ${fmtNum(item.localCount)}</span>
-        <span>سایت: ${
+        <span>${escapeHtml((item.countLabels && item.countLabels.local) || "محلی")}: ${fmtNum(item.localCount)}</span>
+        <span>${escapeHtml((item.countLabels && item.countLabels.site) || "سایت")}: ${
           item.auditing && item.lastAudit && item.lastAudit.siteCountSoFar != null
             ? fmtNum(item.lastAudit.siteCountSoFar) + "…"
             : item.lastAudit && item.lastAudit.siteCount != null
@@ -849,7 +849,11 @@
       kv([
         ["اسکریپت", doc.script],
         ["صفحه", doc.url ? undefined : doc.pagePath || "—"],
-        ["رکورد محلی", fmtNum(doc.localCount)],
+        [(doc.countLabels && doc.countLabels.local) || "محلی", fmtNum(doc.localCount)],
+        [
+          (doc.countLabels && doc.countLabels.site) || "سایت",
+          doc.lastAudit && doc.lastAudit.siteCount != null ? fmtNum(doc.lastAudit.siteCount) : "—",
+        ],
         ["شغل‌های انجام‌شده", `${fmtNum(doc.jobs.doneJobs)} / ${fmtNum(doc.jobs.recordedJobs)}`],
         ["PID", doc.pid],
       ]) +

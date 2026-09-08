@@ -93,14 +93,24 @@ async function main() {
   const store = new Store(db);
   await store.init();
 
+  const companies = db.collection("companies");
+  const withUrl = await companies.countDocuments({
+    profileUrl: { $exists: true, $ne: "" },
+  });
+  const alreadyFetched = await companies.countDocuments({
+    profileUrl: { $exists: true, $ne: "" },
+    profileFetchedAt: { $exists: true, $ne: null },
+  });
   const query = {
     profileUrl: { $exists: true, $ne: "" },
     $or: [{ profileFetchedAt: { $exists: false } }, { profileFetchedAt: null }],
   };
-  const total = await db.collection("companies").countDocuments(query);
-  console.log(`غنی‌سازی پروفایل ${total} شرکت ...`);
+  const pending = await companies.countDocuments(query);
+  console.log(
+    `پروفایل‌ها | هدف(لینک‌دار)=${withUrl} | قبلاً غنی‌شده=${alreadyFetched} | باقیمانده این اجرا=${pending}`
+  );
 
-  const cursor = db.collection("companies").find(query).batchSize(50);
+  const cursor = companies.find(query).batchSize(50);
   let ok = 0;
   let fail = 0;
   while (await cursor.hasNext()) {
@@ -115,19 +125,30 @@ async function main() {
         source: SOURCE.PROD_LICENSE,
         role: "manufacturer",
       });
-      await db.collection("companies").updateOne(
+      await companies.updateOne(
         { _id: company._id },
         { $set: { profileFetchedAt: new Date() } }
       );
       ok += 1;
-      if (ok % 25 === 0) console.log(`  ok=${ok} fail=${fail}`);
+      if (ok % 25 === 0) {
+        console.log(
+          `  این اجرا ok=${ok} fail=${fail} | کل غنی‌شده≈${alreadyFetched + ok}/${withUrl}`
+        );
+      }
     } catch (err) {
       fail += 1;
       console.error(`  خطا ${company.nationalId || company.name}:`, err.message);
     }
   }
 
-  console.log(`تمام. ok=${ok} fail=${fail}`);
+  const fetchedNow = await companies.countDocuments({
+    profileUrl: { $exists: true, $ne: "" },
+    profileFetchedAt: { $exists: true, $ne: null },
+  });
+  const pendingNow = await companies.countDocuments(query);
+  console.log(
+    `تمام. این اجرا ok=${ok} fail=${fail} | کل غنی‌شده=${fetchedNow}/${withUrl} | باقیمانده=${pendingNow}`
+  );
   await client.close();
 }
 
