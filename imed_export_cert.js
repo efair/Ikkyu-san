@@ -9,7 +9,7 @@ const { Progress } = require("./lib/progress");
 const PAGE_PATH = "/additionals/export_cert.aspx";
 const args = C.parseCommonArgs(process.argv.slice(2));
 const DELAY_MS = Number(args.delay || 1200);
-const CAPTCHA_RETRIES = Number(args.captchaRetries || 8);
+const CAPTCHA_RETRIES = Number(args.captchaRetries || 20);
 
 function usage() {
   console.log(`
@@ -28,22 +28,14 @@ Options:
 }
 
 function dateHidden(html) {
-  const names = [
-    "ctl00$MainContent$IssueDate_From",
-    "ctl00$MainContent$IssueDate_From$dateInput",
-    "ctl00$MainContent$IssueDate_From$dateInput_ClientState",
-    "ctl00$MainContent$IssueDate_From_ClientState",
-    "ctl00_MainContent_IssueDate_From_calendar_SD",
-    "ctl00_MainContent_IssueDate_From_calendar_AD",
-    "ctl00$MainContent$IssueDate_To",
-    "ctl00$MainContent$IssueDate_To$dateInput",
-    "ctl00$MainContent$IssueDate_To$dateInput_ClientState",
-    "ctl00$MainContent$IssueDate_To_ClientState",
-    "ctl00_MainContent_IssueDate_To_calendar_SD",
-    "ctl00_MainContent_IssueDate_To_calendar_AD",
-  ];
+  const cheerio = require("cheerio");
+  const $ = cheerio.load(html);
   const extra = {};
-  for (const name of names) extra[name] = C.hidden(html, name);
+  $("input[name*='IssueDate'], input[id*='IssueDate']").each((_, el) => {
+    const name = $(el).attr("name");
+    if (!name) return;
+    extra[name] = $(el).attr("value") || "";
+  });
   return extra;
 }
 
