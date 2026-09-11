@@ -205,7 +205,7 @@ async function fetchBranches(session, branchListUrl, cache) {
   return branches;
 }
 
-async function scrapeProvince(store, session, worker, province, startHtml, log, branchCache) {
+async function scrapeProvince(store, session, worker, province, startHtml, log) {
   if (!args.noResume && !args.maxRows && (await store.isJobDone(SOURCE.DIST, province.id))) {
     if (log) log.skip(`${province.name} (قبلاً تمام شده)`);
     return { skipped: true, items: 0 };
@@ -224,67 +224,84 @@ async function scrapeProvince(store, session, worker, province, startHtml, log, 
     label: province.name,
   });
 
-  let rows = parseDistRows(html);
   let info = C.parsePageInfo(html);
-  for (let page = 2; page <= info.pageCount; page++) {
-    await C.sleep(DELAY_MS);
-    html = await session.postForm(PAGE_PATH, nextPageFields(html, province.id, page));
-    rows = rows.concat(parseDistRows(html));
-    const nextInfo = C.parsePageInfo(html);
-    if (nextInfo.pageCount > info.pageCount) info.pageCount = nextInfo.pageCount;
-  }
-
   const maxRows = Number(args.maxRows || 0);
-  if (maxRows) rows = rows.slice(0, maxRows);
+  let remaining = maxRows || Infinity;
+  let saved = 0;
+  let linked = 0;
+  let branchUrlCount = 0;
+  // کش فقط داخل همین استان؛ بعد از اتمام پاک می‌شود تا OOM نشود
+  const branchCache = new Map();
 
-  const uniqueBranchUrls = [...new Set(rows.map((r) => r.branchListUrl).filter(Boolean))];
-  if (log) {
-    log.setSection(`${province.name} | ${rows.length} ردیف | دریافت شعبه و انبار`);
-    log.setDetected(uniqueBranchUrls.length, "شرکت/شعبه");
-  }
-
-  let i = 0;
-  for (const url of uniqueBranchUrls) {
-    i += 1;
-    if (log) log.setSection(`${province.name} | شعبه ${i}/${uniqueBranchUrls.length}`);
-    try {
-      await fetchBranches(session, url, branchCache);
-    } catch (err) {
-      if (log) log.error(`شعبه ${url}: ${err.message}`);
-      branchCache.set(url, []);
+  for (let page = 1; page <= info.pageCount && remaining > 0; page++) {
+    if (page > 1) {
+      await C.sleep(DELAY_MS);
+      html = await session.postForm(PAGE_PATH, nextPageFields(html, province.id, page));
+      const nextInfo = C.parsePageInfo(html);
+      if (nextInfo.pageCount > info.pageCount) info.pageCount = nextInfo.pageCount;
     }
-    if (log) log.tick(url);
+
+    let rows = parseDistRows(html);
+    if (remaining < Infinity) {
+      rows = rows.slice(0, remaining);
+      remaining -= rows.length;
+    }
+
+    const pageUrls = [...new Set(rows.map((r) => r.branchListUrl).filter(Boolean))];
+    if (log) {
+      log.setSection(
+        `${province.name} | صفحه ${page}/${info.pageCount} | ${rows.length} ردیف | ${pageUrls.length} شعبه`
+      );
+      log.setDetected(rows.length, "مجوز");
+    }
+
+    for (let i = 0; i < pageUrls.length; i++) {
+      const url = pageUrls[i];
+      if (branchCache.has(url)) continue;
+      try {
+        await fetchBranches(session, url, branchCache);
+      } catch (err) {
+        if (log) log.error(`شعبه ${url}: ${err.message}`);
+        branchCache.set(url, []);
+      }
+      branchUrlCount += 1;
+      if (log) log.tick(`شعبه ${i + 1}/${pageUrls.length}`);
+    }
+
+    for (const row of rows) {
+      row.branches = branchCache.get(row.branchListUrl) || [];
+    }
+
+    const result = await store.saveDistRows(rows, (_s, _t, row) => {
+      if (log) log.tick(`${row.distName} — ${row.groupNameFa || row.umdnsGroup}`);
+    });
+    saved += result.saved;
+    linked += result.linked;
+
+    // کمک به GC: ارجاع‌های سنگین را قطع کن
+    for (const row of rows) row.branches = null;
+    rows = null;
   }
 
-  for (const row of rows) {
-    row.branches = branchCache.get(row.branchListUrl) || [];
-  }
-
-  if (log) {
-    log.setSection(`${province.name} | ذخیره مجوزها`);
-    log.setDetected(rows.length, "مجوز");
-  }
-  const result = await store.saveDistRows(rows, (_saved, _total, row) => {
-    if (log) log.tick(`${row.distName} — ${row.groupNameFa || row.umdnsGroup}`);
-  });
+  branchCache.clear();
 
   if (!maxRows) {
     await store.markJob(SOURCE.DIST, province.id, {
       done: true,
       name: province.name,
       pages: info.pageCount,
-      items: result.saved,
-      linked: result.linked,
-      branches: uniqueBranchUrls.length,
+      items: saved,
+      linked,
+      branches: branchUrlCount,
       finishedAt: new Date(),
     });
   }
   return {
     skipped: false,
-    items: result.saved,
-    linked: result.linked,
+    items: saved,
+    linked,
     pages: info.pageCount,
-    branches: uniqueBranchUrls.length,
+    branches: branchUrlCount,
   };
 }
 
@@ -303,10 +320,13 @@ async function main() {
   const log = new Progress("allalloweddist");
   log.start("توزیع کنندگان مجاز");
   console.log("MongoDB:", mongoUri);
+  console.log(
+    "heapLimitMB:",
+    Math.round(require("v8").getHeapStatistics().heap_size_limit / 1024 / 1024)
+  );
 
   const session = new C.Session(PAGE_PATH);
   const worker = await C.createOcrWorker();
-  const branchCache = new Map();
   try {
     let html = await session.getHtml(PAGE_PATH);
     let provinces = C.parseSelectOptions(html, "#ctl00_MainContent_drpProvince").filter((p) => p.id);
@@ -321,16 +341,9 @@ async function main() {
       i += 1;
       log.setSection(`استان ${i}/${provinces.length} — ${province.name}`);
       try {
-        const result = await scrapeProvince(
-          store,
-          session,
-          worker,
-          province,
-          html,
-          log,
-          branchCache
-        );
+        const result = await scrapeProvince(store, session, worker, province, html, log);
         summary.provinces.push({ ...province, ...result, ok: true });
+        if (global.gc) global.gc();
       } catch (err) {
         log.error(`${province.name}: ${err.message}`);
         summary.provinces.push({ ...province, ok: false, error: err.message });
