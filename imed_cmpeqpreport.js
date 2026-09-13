@@ -234,42 +234,42 @@ function toDetailPath(url) {
   return "/additionals/" + String(url).replace(/^\.\.\//, "");
 }
 
-async function fetchAllPages(session, startHtml, nameFa, maxPages) {
-  let html = startHtml;
-  let rows = parseEqpRows(html);
-  let pager = parsePager(html);
-  const limit = maxPages || Infinity;
-  while (pager.hasNext && pager.current < limit) {
-    const next = pager.current + 1;
-    await C.sleep(DELAY_MS);
-    html = await session.postForm(PAGE_PATH, pageFields(html, nameFa, next));
-    const more = parseEqpRows(html);
-    if (!more.length) break;
-    rows = rows.concat(more);
-    const nextPager = parsePager(html);
-    if (nextPager.current <= pager.current) break;
-    pager = nextPager;
-  }
-  return rows;
-}
-
-async function enrichDetails(session, store, rows, log) {
+async function enrichPageDetails(session, store, rows, log, progress) {
   const codes = rows.map((r) => r.code).filter(Boolean);
   const already = await store.eqpCodesWithDetails(codes);
   let fetched = 0;
+  let skipped = 0;
   for (const row of rows) {
-    if (!row.code || already.has(row.code)) continue;
+    if (!row.code) continue;
+    if (already.has(row.code)) {
+      skipped += 1;
+      progress.detailDone += 1;
+      continue;
+    }
     await C.sleep(DELAY_MS);
     try {
       const html = await session.getHtml(toDetailPath(row.detailUrl));
       Object.assign(row, parseDetails(html));
       already.add(row.code);
       fetched += 1;
+      progress.detailDone += 1;
+      progress.detailsFetched += 1;
+      if (log) {
+        const label = row.nameFa || row.nameEn || row.labelName || row.code;
+        log.note(
+          `${progress.token} | جزئیات ${progress.detailDone}/${progress.total || "?"} | ${label}`
+        );
+      }
     } catch (err) {
       if (log) log.error(`جزئیات ${row.code}: ${err.message}`);
     }
   }
-  return fetched;
+  if (log && skipped) {
+    log.note(
+      `${progress.token} | ${skipped} مورد این صفحه قبلاً جزئیات داشت — رد شد`
+    );
+  }
+  return { fetched, skipped };
 }
 
 async function scrapeName(store, session, name, log) {
@@ -284,11 +284,13 @@ async function scrapeName(store, session, name, log) {
     return { skipped: true, items: 0 };
   }
 
+  if (log) log.note(`شروع جستجو: ${name}`);
   let html = await session.getHtml(PAGE_PATH);
   await C.sleep(DELAY_MS);
   html = await session.postForm(PAGE_PATH, searchFields(html, name));
   const info = parseTotal(html);
   if (info.empty || !info.total) {
+    if (log) log.note(`${name} | نتیجه‌ای نیست`);
     await store.markJob(SOURCE.EQP_REPORT, jobKey(name), {
       done: true,
       token: name,
@@ -300,18 +302,72 @@ async function scrapeName(store, session, name, log) {
   }
 
   if (log) log.setSection(`${name} | ${info.total} رکورد`);
-  const rows = await fetchAllPages(session, html, name, args.maxPages);
-  const details = await enrichDetails(session, store, rows, log);
-  const saved = await store.saveEqpRows(rows, name);
+  const progress = {
+    token: name,
+    total: info.total,
+    detailDone: 0,
+    detailsFetched: 0,
+    saved: 0,
+    pages: 0,
+  };
+  const limit = args.maxPages || Infinity;
+  let pager = parsePager(html);
+  let page = pager.current || 1;
+
+  while (true) {
+    const rows = parseEqpRows(html);
+    progress.pages += 1;
+    if (log) {
+      log.note(
+        `${name} | صفحه ${page} | ${rows.length} ردیف در صفحه | جمع جزئیات ${progress.detailDone}/${info.total}`
+      );
+    }
+    if (rows.length) {
+      await enrichPageDetails(session, store, rows, log, progress);
+      const saved = await store.saveEqpRows(rows, name);
+      progress.saved += saved.saved;
+      if (log) {
+        log.setSection(
+          `${name} | صفحه ${page} | ذخیره ${progress.saved}/${info.total} | جزئیات جدید ${progress.detailsFetched}`
+        );
+      }
+      await store.markJob(SOURCE.EQP_REPORT, jobKey(name), {
+        done: false,
+        token: name,
+        items: progress.saved,
+        total: info.total,
+        details: progress.detailsFetched,
+        page,
+        updatedAt: new Date(),
+      });
+    }
+
+    if (!pager.hasNext || page >= limit) break;
+    const next = page + 1;
+    await C.sleep(DELAY_MS);
+    html = await session.postForm(PAGE_PATH, pageFields(html, name, next));
+    const nextPager = parsePager(html);
+    if (nextPager.current <= page && !parseEqpRows(html).length) break;
+    pager = nextPager;
+    page = nextPager.current || next;
+  }
+
   await store.markJob(SOURCE.EQP_REPORT, jobKey(name), {
     done: true,
     token: name,
-    items: saved.saved,
+    items: progress.saved,
     total: info.total,
-    details,
+    details: progress.detailsFetched,
+    pages: progress.pages,
     finishedAt: new Date(),
   });
-  return { skipped: false, items: saved.saved, total: info.total, details };
+  return {
+    skipped: false,
+    items: progress.saved,
+    total: info.total,
+    details: progress.detailsFetched,
+    pages: progress.pages,
+  };
 }
 
 async function main() {
@@ -363,12 +419,18 @@ async function main() {
   const summary = { source: SOURCE.EQP_REPORT, startedAt: new Date(), names: 0, items: 0 };
   try {
     for (const name of pending) {
-      log.setSection(name);
+      log.setSection(`بخش نام ${log.done + 1}/${pending.length}: ${name}`);
       try {
         const result = await scrapeName(store, session, name, log);
         summary.names += 1;
         summary.items += result.items || 0;
-        log.tick(`${name} — ${result.items || 0}`);
+        if (result.skipped) {
+          log.tick(`${name} — رد شد`);
+        } else {
+          log.tick(
+            `${name} — ${result.items || 0} ذخیره | ${result.details || 0} جزئیات | ${result.pages || 0} صفحه`
+          );
+        }
       } catch (err) {
         log.error(`${name}: ${err.message}`);
       }
