@@ -232,13 +232,21 @@ function shrinkHtmlToForm(html) {
   return parts.join("");
 }
 
-async function scrapeProvince(store, session, worker, province, startHtml, log) {
+async function scrapeProvince(store, session, worker, province, startHtml, log, meta = {}) {
+  const provinceIdx = meta.provinceIdx || 1;
+  const provinceTotal = meta.provinceTotal || 1;
+
   if (!args.noResume && !args.maxRows && (await store.isJobDone(SOURCE.DIST, province.id))) {
     if (log) log.skip(`${province.name} (قبلاً تمام شده)`);
     return { skipped: true, items: 0 };
   }
 
-  if (log) log.setSection(`جستجو استان ${province.name}`);
+  const statusLine = (parts) =>
+    [`استان ${provinceIdx}/${provinceTotal}: ${province.name}`, ...parts.filter(Boolean)].join(" | ");
+
+  if (log) {
+    log.setSection(statusLine(["در حال جستجو و کپچا"]));
+  }
   let html = await C.searchWithCaptcha({
     session,
     worker,
@@ -252,23 +260,39 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
   });
 
   let info = C.parsePageInfo(html);
-  if (log) {
-    log.note(
-      `${province.name} | صفحات=${info.pageCount} | اندازه≈${Math.round(Buffer.byteLength(html, "utf8") / 1024)}KB | itemCount=${info.itemCount || "?"}`
-    );
-  }
   const maxRows = Number(args.maxRows || 0);
   let remaining = maxRows || Infinity;
   let saved = 0;
   let linked = 0;
   let branchUrlCount = 0;
+  let provinceRowTotal = info.itemCount || 0;
+
+  if (log) {
+    log.setSection(
+      statusLine([
+        `صفحات سایت: ${info.pageCount}`,
+        info.itemCount ? `رکورد اعلام‌شده: ${info.itemCount}` : null,
+        "در حال خواندن جدول…",
+      ])
+    );
+    log.note(
+      `${province.name} | صفحات=${info.pageCount} | اندازه≈${Math.round(Buffer.byteLength(html, "utf8") / 1024)}KB | itemCount=${info.itemCount || "?"}`
+    );
+  }
 
   for (let page = 1; page <= info.pageCount && remaining > 0; page++) {
     if (page > 1) {
       await C.sleep(DELAY_MS);
+      if (log) {
+        log.updateSection(
+          statusLine([`صفحه ${page}/${info.pageCount}`, "در حال دریافت صفحه…"]),
+          `صفحه ${page}`
+        );
+      }
       html = await session.postForm(PAGE_PATH, nextPageFields(html, province.id, page));
       const nextInfo = C.parsePageInfo(html);
       if (nextInfo.pageCount > info.pageCount) info.pageCount = nextInfo.pageCount;
+      if (nextInfo.itemCount) provinceRowTotal = nextInfo.itemCount;
     }
 
     let rows = parseDistRows(html);
@@ -276,6 +300,11 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
       rows = rows.slice(0, remaining);
       remaining -= rows.length;
     }
+    if (!provinceRowTotal) provinceRowTotal = rows.length;
+    // اگر همه در یک صفحه آمده، همان تعداد ردیف معیار است
+    if (info.pageCount === 1) provinceRowTotal = rows.length;
+
+    const uniqueCompanies = new Set(rows.map((r) => r.distName).filter(Boolean)).size;
 
     // ViewState را نگه دار، بقیه HTML سنگین را دور بریز
     html = shrinkHtmlToForm(html);
@@ -287,10 +316,20 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
       urlUses.set(row.branchListUrl, (urlUses.get(row.branchListUrl) || 0) + 1);
     }
     const pageCache = new Map();
+    const uniqueBranchCount = urlUses.size;
 
     if (log) {
+      log.setSection(
+        statusLine([
+          `صفحه ${page}/${info.pageCount}`,
+          `${provinceRowTotal} ردیف در استان`,
+          `${uniqueCompanies} شرکت یکتا در این صفحه`,
+          `${uniqueBranchCount} شعبه یکتا`,
+          `ذخیره ۰/${rows.length}`,
+        ])
+      );
       log.note(
-        `${province.name} | صفحه ${page}/${info.pageCount} | ${rows.length} ردیف | ${urlUses.size} شعبه یکتا | ${log.progressText()}`
+        `${province.name} | صفحه ${page}/${info.pageCount} | ${rows.length} ردیف | ${uniqueCompanies} شرکت | ${uniqueBranchCount} شعبه | ${log.progressText()}`
       );
     }
 
@@ -300,11 +339,23 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
       if (url) {
         if (!pageCache.has(url)) {
           try {
+            if (log) {
+              log.updateSection(
+                statusLine([
+                  `صفحه ${page}/${info.pageCount}`,
+                  `ردیف ${ri + 1}/${rows.length}`,
+                  `ذخیره‌شده ${saved}/${provinceRowTotal}`,
+                  `${uniqueCompanies} شرکت در صفحه`,
+                  "دریافت شعبه‌ها…",
+                ]),
+                row.distName || ""
+              );
+            }
             pageCache.set(url, await fetchBranches(session, url));
             branchUrlCount += 1;
-            if (log) {
+            if (log && (branchUrlCount <= 3 || branchUrlCount % 10 === 0)) {
               log.note(
-                `${province.name} | صفحه ${page} | شعبه‌ها ${pageCache.size}/${urlUses.size} | ردیف ${ri + 1}/${rows.length}`
+                `${province.name} | صفحه ${page}/${info.pageCount} | شعبه یکتای ${branchUrlCount}/${uniqueBranchCount} | ردیف ${ri + 1}/${rows.length}`
               );
             }
           } catch (err) {
@@ -317,13 +368,29 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
         row.branches = [];
       }
 
-      const result = await store.saveDistRows([row], (_s, _t, r) => {
-        if (log && (ri === 0 || (ri + 1) % 10 === 0 || ri + 1 === rows.length)) {
-          log.note(`${province.name} | ذخیره ${ri + 1}/${rows.length}: ${r.distName}`);
-        }
-      });
+      const result = await store.saveDistRows([row]);
       saved += result.saved;
       linked += result.linked;
+
+      if (log) {
+        const line = statusLine([
+          `صفحه ${page}/${info.pageCount}`,
+          `ردیف ${ri + 1}/${rows.length} از ${provinceRowTotal}`,
+          `ذخیره‌شده ${saved}`,
+          `${uniqueCompanies} شرکت در صفحه`,
+          row.distName ? `شرکت: ${row.distName}` : null,
+        ]);
+        // هر ردیف وضعیت پنل؛ هر ۲۰ ردیف یک خط لاگ
+        if ((ri + 1) % 20 === 0 || ri === 0 || ri + 1 === rows.length) {
+          log.setSection(line);
+          log.note(
+            `${province.name} | صفحه ${page}/${info.pageCount} | ذخیره ${ri + 1}/${rows.length} | شرکت: ${row.distName || "—"}`
+          );
+        } else {
+          log.updateSection(line, row.distName || "");
+        }
+      }
+
       row.branches = null;
       rows[ri] = null;
 
@@ -353,6 +420,11 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
       branches: branchUrlCount,
       finishedAt: new Date(),
     });
+  }
+  if (log) {
+    log.setSection(
+      statusLine([`تمام شد`, `${saved} ردیف ذخیره‌شده`, `${branchUrlCount} شعبه`])
+    );
   }
   return {
     skipped: false,
@@ -405,7 +477,10 @@ async function main() {
       const left = pending.length - log.done;
       log.setSection(`استان ${idx}/${pending.length} (مانده ${left}) — ${province.name}`);
       try {
-        const result = await scrapeProvince(store, session, worker, province, html, log);
+        const result = await scrapeProvince(store, session, worker, province, html, log, {
+          provinceIdx: idx,
+          provinceTotal: pending.length,
+        });
         summary.provinces.push({ ...province, ...result, ok: true });
         if (result.skipped) {
           log.tick(`${province.name} — قبلاً تمام`);

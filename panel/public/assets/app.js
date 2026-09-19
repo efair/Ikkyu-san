@@ -794,13 +794,13 @@
       </div>
       <div class="bar"><i style="width:${bar}%"></i></div>
       ${progressLine ? `<p class="muted">${escapeHtml(progressLine)}</p>` : ""}
-      <p class="muted">${escapeHtml(
+      <p><strong>${escapeHtml(
         (item.auditing && item.lastAudit && item.lastAudit.section) ||
           p.section ||
           (item.lastAudit && item.lastAudit.section) ||
           (item.lastRun && item.lastRun.summary) ||
           "هنوز گزارشی نیست"
-      )}</p>
+      )}</strong></p>
       ${p.lastItem ? `<p class="muted">الان: ${escapeHtml(p.lastItem)}</p>` : ""}
       ${p.lastError ? `<p class="form-error">${escapeHtml(p.lastError)}</p>` : ""}
       <div class="worker-actions">
