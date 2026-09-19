@@ -189,9 +189,8 @@ async function fetchGridPages(session, urlPath, parseFn) {
   return rows;
 }
 
-async function fetchBranches(session, branchListUrl, cache) {
+async function fetchBranches(session, branchListUrl) {
   if (!branchListUrl) return [];
-  if (cache.has(branchListUrl)) return cache.get(branchListUrl);
   const path = toPath(branchListUrl);
   const branches = await fetchGridPages(session, path, parseBranches);
   for (const branch of branches) {
@@ -202,8 +201,35 @@ async function fetchBranches(session, branchListUrl, cache) {
     await C.sleep(DELAY_MS);
     branch.warehouses = await fetchGridPages(session, toPath(branch.storeListUrl), parseWarehouses);
   }
-  cache.set(branchListUrl, branches);
   return branches;
+}
+
+function shrinkHtmlToForm(html) {
+  // جدول و اسکریپت‌های سنگین را دور بریز؛ فقط hiddenهای لازم برای صفحه بعد بماند
+  const names = [
+    "ctl00_MainContent_ScriptManager1_TSM",
+    "__VIEWSTATE",
+    "__VIEWSTATEGENERATOR",
+    "__EVENTVALIDATION",
+    "ctl00$MainContent$RadGrid1_ClientState",
+    "ctl00_MainContent_txt_rad_DistCompany_ClientState",
+    "ctl00$MainContent$txt_rad_DistCompany_ClientState",
+    "ctl00_MainContent_rad_txtTarafGharardad_ClientState",
+    "ctl00$MainContent$rad_txtTarafGharardad_ClientState",
+    "ctl00_MainContent_txtKalaName_ClientState",
+    "ctl00$MainContent$txtKalaName_ClientState",
+    "ctl00_MainContent_txt_ManuName_ClientState",
+    "ctl00$MainContent$txt_ManuName_ClientState",
+  ];
+  const parts = ['<html><body><form id="aspnetForm">'];
+  for (const name of names) {
+    const val = C.hidden(html, name);
+    if (val === "" && !name.startsWith("__")) continue;
+    const safe = String(val).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    parts.push(`<input type="hidden" name="${name}" id="${name}" value="${safe}" />`);
+  }
+  parts.push("</form></body></html>");
+  return parts.join("");
 }
 
 async function scrapeProvince(store, session, worker, province, startHtml, log) {
@@ -226,13 +252,16 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
   });
 
   let info = C.parsePageInfo(html);
+  if (log) {
+    log.note(
+      `${province.name} | صفحات=${info.pageCount} | اندازه≈${Math.round(Buffer.byteLength(html, "utf8") / 1024)}KB | itemCount=${info.itemCount || "?"}`
+    );
+  }
   const maxRows = Number(args.maxRows || 0);
   let remaining = maxRows || Infinity;
   let saved = 0;
   let linked = 0;
   let branchUrlCount = 0;
-  // کش فقط داخل همین استان؛ بعد از اتمام پاک می‌شود تا OOM نشود
-  const branchCache = new Map();
 
   for (let page = 1; page <= info.pageCount && remaining > 0; page++) {
     if (page > 1) {
@@ -248,44 +277,71 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
       remaining -= rows.length;
     }
 
-    const pageUrls = [...new Set(rows.map((r) => r.branchListUrl).filter(Boolean))];
+    // ViewState را نگه دار، بقیه HTML سنگین را دور بریز
+    html = shrinkHtmlToForm(html);
+    if (global.gc) global.gc();
+
+    const urlUses = new Map();
+    for (const row of rows) {
+      if (!row.branchListUrl) continue;
+      urlUses.set(row.branchListUrl, (urlUses.get(row.branchListUrl) || 0) + 1);
+    }
+    const pageCache = new Map();
+
     if (log) {
       log.note(
-        `${province.name} | صفحه ${page}/${info.pageCount} | ${rows.length} ردیف | ${pageUrls.length} شعبه | ${log.progressText()}`
+        `${province.name} | صفحه ${page}/${info.pageCount} | ${rows.length} ردیف | ${urlUses.size} شعبه یکتا | ${log.progressText()}`
       );
     }
 
-    for (let i = 0; i < pageUrls.length; i++) {
-      const url = pageUrls[i];
-      if (branchCache.has(url)) continue;
-      try {
-        await fetchBranches(session, url, branchCache);
-      } catch (err) {
-        if (log) log.error(`شعبه ${url}: ${err.message}`);
-        branchCache.set(url, []);
+    for (let ri = 0; ri < rows.length; ri++) {
+      const row = rows[ri];
+      const url = row.branchListUrl;
+      if (url) {
+        if (!pageCache.has(url)) {
+          try {
+            pageCache.set(url, await fetchBranches(session, url));
+            branchUrlCount += 1;
+            if (log) {
+              log.note(
+                `${province.name} | صفحه ${page} | شعبه‌ها ${pageCache.size}/${urlUses.size} | ردیف ${ri + 1}/${rows.length}`
+              );
+            }
+          } catch (err) {
+            if (log) log.error(`شعبه ${url}: ${err.message}`);
+            pageCache.set(url, []);
+          }
+        }
+        row.branches = pageCache.get(url) || [];
+      } else {
+        row.branches = [];
       }
-      branchUrlCount += 1;
-      if (log) log.note(`${province.name} | شعبه ${i + 1}/${pageUrls.length}`);
+
+      const result = await store.saveDistRows([row], (_s, _t, r) => {
+        if (log && (ri === 0 || (ri + 1) % 10 === 0 || ri + 1 === rows.length)) {
+          log.note(`${province.name} | ذخیره ${ri + 1}/${rows.length}: ${r.distName}`);
+        }
+      });
+      saved += result.saved;
+      linked += result.linked;
+      row.branches = null;
+      rows[ri] = null;
+
+      if (url) {
+        const left = (urlUses.get(url) || 1) - 1;
+        if (left <= 0) {
+          urlUses.delete(url);
+          pageCache.delete(url);
+        } else {
+          urlUses.set(url, left);
+        }
+      }
     }
 
-    for (const row of rows) {
-      row.branches = branchCache.get(row.branchListUrl) || [];
-    }
-
-    const result = await store.saveDistRows(rows, (_s, _t, row) => {
-      if (log) log.note(`${province.name} | ذخیره: ${row.distName} — ${row.groupNameFa || row.umdnsGroup}`);
-    });
-    saved += result.saved;
-    linked += result.linked;
-
-    // کمک به GC: ارجاع‌های سنگین را قطع کن؛ کش شعبه فقط برای همین صفحه لازم بود
-    for (const row of rows) row.branches = null;
     rows = null;
-    for (const url of pageUrls) branchCache.delete(url);
+    pageCache.clear();
     if (global.gc) global.gc();
   }
-
-  branchCache.clear();
 
   if (!maxRows) {
     await store.markJob(SOURCE.DIST, province.id, {
