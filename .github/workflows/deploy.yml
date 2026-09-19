@@ -38,6 +38,10 @@ jobs:
             set -euo pipefail
             cd /opt/ikkyu-san
             npm install --omit=dev
+            if [ -f deploy/ikkyu-panel.service ]; then
+              cp deploy/ikkyu-panel.service /etc/systemd/system/ikkyu-panel.service
+              systemctl daemon-reload
+            fi
             systemctl restart ikkyu-panel
             sleep 2
             systemctl is-active ikkyu-panel

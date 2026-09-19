@@ -1,0 +1,20 @@
+[Unit]
+Description=Ikkyu-san IMED panel
+After=network.target mongod.service
+Wants=mongod.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ikkyu-san
+EnvironmentFile=-/etc/ikkyu-san.env
+Environment=NODE_ENV=production
+Environment=PANEL_HOST=0.0.0.0
+Environment=PANEL_PORT=5050
+ExecStart=/usr/bin/node panel.js
+Restart=on-failure
+RestartSec=3
+# فقط خود پنل را بکش؛ ورکرهای detached زنده بمانند
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

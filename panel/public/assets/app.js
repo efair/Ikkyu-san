@@ -758,7 +758,15 @@
     const p = item.progress || {};
     const total = p.total || item.jobs.recordedJobs || 0;
     const done = p.done || item.jobs.doneJobs || 0;
-    const bar = item.running ? pct(done, total) : item.lastAudit ? pct(item.localCount, item.lastAudit.siteCount || item.localCount) : pct(item.jobs.doneJobs, item.jobs.recordedJobs);
+    const remaining = p.remaining != null ? p.remaining : Math.max(0, total - done);
+    const bar = item.running
+      ? pct(done, total)
+      : item.lastAudit
+        ? pct(item.localCount, item.lastAudit.siteCount || item.localCount)
+        : pct(item.jobs.doneJobs, item.jobs.recordedJobs);
+    const progressLine = item.running && total
+      ? `رفته ${fmtNum(done)} / ${fmtNum(total)}${p.label ? " " + p.label : ""} — مانده ${fmtNum(remaining)}`
+      : "";
     return `<article class="worker-card" data-worker="${item.id}">
       <header>
         <div>
@@ -785,6 +793,7 @@
         <span>وضعیت داده: ${verdictFa(item.lastAudit && item.lastAudit.verdict)}</span>
       </div>
       <div class="bar"><i style="width:${bar}%"></i></div>
+      ${progressLine ? `<p class="muted">${escapeHtml(progressLine)}</p>` : ""}
       <p class="muted">${escapeHtml(
         (item.auditing && item.lastAudit && item.lastAudit.section) ||
           p.section ||

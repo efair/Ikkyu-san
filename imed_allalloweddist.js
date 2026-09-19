@@ -249,10 +249,9 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
 
     const pageUrls = [...new Set(rows.map((r) => r.branchListUrl).filter(Boolean))];
     if (log) {
-      log.setSection(
-        `${province.name} | صفحه ${page}/${info.pageCount} | ${rows.length} ردیف | ${pageUrls.length} شعبه`
+      log.note(
+        `${province.name} | صفحه ${page}/${info.pageCount} | ${rows.length} ردیف | ${pageUrls.length} شعبه | ${log.progressText()}`
       );
-      log.setDetected(rows.length, "مجوز");
     }
 
     for (let i = 0; i < pageUrls.length; i++) {
@@ -265,7 +264,7 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
         branchCache.set(url, []);
       }
       branchUrlCount += 1;
-      if (log) log.tick(`شعبه ${i + 1}/${pageUrls.length}`);
+      if (log) log.note(`${province.name} | شعبه ${i + 1}/${pageUrls.length}`);
     }
 
     for (const row of rows) {
@@ -273,7 +272,7 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
     }
 
     const result = await store.saveDistRows(rows, (_s, _t, row) => {
-      if (log) log.tick(`${row.distName} — ${row.groupNameFa || row.umdnsGroup}`);
+      if (log) log.note(`${province.name} | ذخیره: ${row.distName} — ${row.groupNameFa || row.umdnsGroup}`);
     });
     saved += result.saved;
     linked += result.linked;
@@ -334,19 +333,33 @@ async function main() {
       provinces = provinces.filter((p) => p.id === args.province);
       if (!provinces.length) throw new Error(`استان ${args.province} پیدا نشد`);
     }
-    log.setDetected(provinces.length, "استان");
+    const doneKeys = args.noResume ? new Set() : await store.doneJobKeys(SOURCE.DIST);
+    const pending = provinces.filter((p) => !doneKeys.has(p.id));
+    const alreadyDone = provinces.length - pending.length;
+    log.setDetected(pending.length, "استان");
+    if (alreadyDone) {
+      log.note(`از قبل تمام شده: ${alreadyDone} استان — باقیمانده ${pending.length}`);
+    }
     const summary = { source: SOURCE.DIST, startedAt: new Date(), provinces: [] };
-    let i = 0;
-    for (const province of provinces) {
-      i += 1;
-      log.setSection(`استان ${i}/${provinces.length} — ${province.name}`);
+    for (const province of pending) {
+      const idx = log.done + 1;
+      const left = pending.length - log.done;
+      log.setSection(`استان ${idx}/${pending.length} (مانده ${left}) — ${province.name}`);
       try {
         const result = await scrapeProvince(store, session, worker, province, html, log);
         summary.provinces.push({ ...province, ...result, ok: true });
+        if (result.skipped) {
+          log.tick(`${province.name} — قبلاً تمام`);
+        } else {
+          log.tick(
+            `${province.name} — ${result.items || 0} مجوز | مانده ${Math.max(0, pending.length - log.done)}`
+          );
+        }
         if (global.gc) global.gc();
       } catch (err) {
         log.error(`${province.name}: ${err.message}`);
         summary.provinces.push({ ...province, ok: false, error: err.message });
+        log.tick(`${province.name} — خطا`);
       }
       html = await session.getHtml(PAGE_PATH);
     }
@@ -355,7 +368,9 @@ async function main() {
     summary.okCount = summary.provinces.filter((p) => p.ok).length;
     summary.items = summary.provinces.reduce((n, p) => n + (p.items || 0), 0);
     await store.saveRun(summary);
-    log.finish(`استان موفق ${summary.okCount}/${provinces.length} | ${summary.items} مجوز`);
+    log.finish(
+      `استان موفق ${summary.okCount}/${pending.length} | از قبل ${alreadyDone} | ${summary.items} مجوز`
+    );
   } finally {
     await worker.terminate();
     await client.close();

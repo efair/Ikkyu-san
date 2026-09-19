@@ -349,7 +349,7 @@ async function enrichCompany(session, row, cache, log) {
 }
 
 async function scrapeName(store, session, worker, name, log, cache) {
-  if (log) log.setSection(`جستجو ${name}`);
+  if (log) log.note(`شروع جستجو نام کالا: ${name} | ${log.progressText()}`);
   let html = await session.getHtml(PAGE_PATH);
   html = await C.searchWithCaptcha({
     session,
@@ -365,17 +365,24 @@ async function scrapeName(store, session, worker, name, log, cache) {
 
   let companies = await fetchGridPages(session, html, PAGE_PATH, parseMasterRows, name);
   if (log) {
-    log.setSection(`${name} | ${companies.length} شرکت`);
-    log.setDetected(Math.max(companies.length, 1), "شرکت");
+    log.setSection(
+      `نام ${log.done + 1}/${log.total || log.detected} (مانده ${log.remaining()}) | ${name} | ${companies.length} شرکت`
+    );
   }
 
   let saved = 0;
   let linked = 0;
   if (!companies.length) {
-    if (log) log.tick(`${name}: بدون شرکت`);
+    if (log) log.note(`${name}: بدون شرکت`);
   }
-  for (const company of companies) {
+  for (let i = 0; i < companies.length; i++) {
+    const company = companies[i];
     try {
+      if (log) {
+        log.note(
+          `${name} | شرکت ${i + 1}/${companies.length} | ${company.name || "?"} — ${company.cmpCode || ""}`
+        );
+      }
       await enrichCompany(session, company, cache, log);
       const result = await store.saveConfirmedImporterRows([company], name, SOURCE.CONFIRMED_IMPORT);
       saved += result.saved || 0;
@@ -384,8 +391,8 @@ async function scrapeName(store, session, worker, name, log, cache) {
         source: SOURCE.CONFIRMED_IMPORT,
       });
       if (log) {
-        log.tick(`${company.name} — ${company.cmpCode} | یکتا=${totalUnique}`);
-        log.extra = `یکتای ذخیره‌شده ${totalUnique}`;
+        log.note(`${name} | ذخیره شد: ${company.name} | یکتا=${totalUnique}`);
+        log.extra = `یکتای ذخیره‌شده ${totalUnique} | ${log.progressText()}`;
         log.flush(true);
       }
     } catch (err) {
@@ -439,6 +446,9 @@ async function main() {
   const done = args.noResume ? new Set() : await store.doneJobKeys(SOURCE.CONFIRMED_IMPORT);
   const pending = names.filter((n) => !done.has(n));
   log.setDetected(pending.length, "نام کالا");
+  if (done.size) {
+    log.note(`از قبل تمام شده: ${done.size} نام — باقیمانده ${pending.length}`);
+  }
 
   const session = new C.Session(PAGE_PATH);
   const worker = await C.createOcrWorker();
@@ -446,12 +456,16 @@ async function main() {
   const summary = { source: SOURCE.CONFIRMED_IMPORT, startedAt: new Date(), names: 0, items: 0 };
   try {
     for (const name of pending) {
+      const left = log.remaining();
+      log.setSection(`نام ${log.done + 1}/${pending.length} (مانده ${left}) — ${name}`);
       try {
         const result = await scrapeName(store, session, worker, name, log, cache);
         summary.names += 1;
         summary.items += result.saved || 0;
+        log.tick(`${name} — ${result.saved || 0} شرکت | مانده ${Math.max(0, pending.length - (log.done + 1))}`);
       } catch (err) {
         log.error(`${name}: ${err.message}`);
+        log.tick(`${name} — خطا`);
       }
     }
     summary.finishedAt = new Date();

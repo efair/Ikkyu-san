@@ -9,12 +9,18 @@ const bcrypt = require("bcryptjs");
 const { MongoClient, ObjectId } = require("mongodb");
 const { MONGO_URI, DB_NAME } = require("./lib/imedClient");
 const { WorkerManager } = require("./lib/workerManager");
+const { MongoSessionStore } = require("./lib/mongoSessionStore");
 
 const PORT = Number(process.env.PANEL_PORT || 5050);
 const HOST = process.env.PANEL_HOST || "127.0.0.1";
 const DEFAULT_USER = process.env.PANEL_USER || "admin";
 const DEFAULT_PASSWORD = process.env.PANEL_PASSWORD || "imed1405";
-const SESSION_SECRET = process.env.PANEL_SECRET || crypto.randomBytes(32).toString("hex");
+
+function panelSessionSecret(mongoUri) {
+  if (process.env.PANEL_SECRET) return process.env.PANEL_SECRET;
+  // پایدار بین ری‌استارت‌ها تا کوکی‌ها بی‌اعتبار نشوند
+  return crypto.createHash("sha256").update(`imed-panel-session:${mongoUri}`).digest("hex");
+}
 
 const LICENSE_KINDS = {
   retail: "عرضه کنندگان مجاز",
@@ -152,6 +158,9 @@ async function main() {
     console.log(`کاربر پنل ساخته شد: ${DEFAULT_USER} / ${DEFAULT_PASSWORD}`);
   }
 
+  const sessionStore = new MongoSessionStore(db.collection("panel_sessions"));
+  await sessionStore.ensureIndexes();
+
   const app = express();
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
@@ -159,9 +168,10 @@ async function main() {
   app.use(
     session({
       name: "imed.sid",
-      secret: SESSION_SECRET,
+      secret: panelSessionSecret(mongoUri),
       resave: false,
       saveUninitialized: false,
+      store: sessionStore,
       cookie: {
         httpOnly: true,
         sameSite: "lax",
