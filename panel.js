@@ -560,8 +560,16 @@ async function main() {
   });
 
   const shutdown = async () => {
-    server.close();
-    await client.close();
+    try {
+      server.close();
+    } catch {
+      // ignore
+    }
+    try {
+      await client.close();
+    } catch {
+      // ignore
+    }
     process.exit(0);
   };
   process.on("SIGINT", shutdown);

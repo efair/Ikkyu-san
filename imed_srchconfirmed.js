@@ -273,6 +273,10 @@ async function fetchHtmlCached(session, url, cache) {
   await C.sleep(DELAY_MS);
   const html = await session.getHtml(toPath(url));
   cache.set(url, html);
+  while (cache.size > 250) {
+    const oldest = cache.keys().next().value;
+    cache.delete(oldest);
+  }
   return html;
 }
 
@@ -312,6 +316,7 @@ async function enrichCompany(session, row, cache, log) {
     return row;
   }
   try {
+    if (log) log.note(`${row.name || "شرکت"} | دریافت نمایندگی‌ها…`);
     const agencyHtml = await fetchHtmlCached(session, row.agenciesUrl, cache);
     row.agencies = parseAgencies(agencyHtml);
   } catch (err) {
@@ -320,9 +325,16 @@ async function enrichCompany(session, row, cache, log) {
     return row;
   }
 
-  for (const agency of row.agencies) {
+  if (log) log.note(`${row.name || "شرکت"} | ${row.agencies.length} نمایندگی`);
+  for (let ai = 0; ai < row.agencies.length; ai++) {
+    const agency = row.agencies[ai];
     if (!agency.productsUrl) continue;
     try {
+      if (log) {
+        log.note(
+          `${row.name || "شرکت"} | نمایندگی ${ai + 1}/${row.agencies.length}: ${agency.name || "?"} — کالاها`
+        );
+      }
       const prodHtml = await fetchHtmlCached(session, agency.productsUrl, cache);
       agency.products = parseAgencyProducts(prodHtml);
     } catch (err) {
@@ -330,9 +342,20 @@ async function enrichCompany(session, row, cache, log) {
       agency.products = [];
       continue;
     }
-    for (const product of agency.products) {
+    if (log) {
+      log.note(
+        `${row.name || "شرکت"} | نمایندگی ${ai + 1}/${row.agencies.length}: ${agency.products.length} کالا`
+      );
+    }
+    for (let pi = 0; pi < agency.products.length; pi++) {
+      const product = agency.products[pi];
       if (!product.confirmedEqUrl) continue;
       try {
+        if (log && (pi === 0 || (pi + 1) % 5 === 0 || pi + 1 === agency.products.length)) {
+          log.note(
+            `${row.name || "شرکت"} | غنی‌سازی کالا ${pi + 1}/${agency.products.length}: ${product.nameFa || product.nameEn || "?"}`
+          );
+        }
         const eqHtml = await fetchHtmlCached(session, product.confirmedEqUrl, cache);
         const registered = parseRegisteredProducts(eqHtml);
         for (const item of registered) {

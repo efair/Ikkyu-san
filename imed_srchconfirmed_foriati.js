@@ -273,6 +273,10 @@ async function fetchHtmlCached(session, url, cache) {
   await C.sleep(DELAY_MS);
   const html = await session.getHtml(toPath(url));
   cache.set(url, html);
+  while (cache.size > 250) {
+    const oldest = cache.keys().next().value;
+    cache.delete(oldest);
+  }
   return html;
 }
 
