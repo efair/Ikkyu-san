@@ -40,10 +40,13 @@ function toPath(url) {
 
 function parseDistRows(html) {
   const cheerio = require("cheerio");
-  const $ = cheerio.load(html);
-  const $table = $("#ctl00_MainContent_RadGrid1 table.rgMasterTable").first();
+  const fragment = C.extractMasterTableHtml(html) || html;
+  const $ = cheerio.load(fragment, { xml: false });
+  const $table = $("table.rgMasterTable").first().length
+    ? $("table.rgMasterTable").first()
+    : $.root();
   const rows = [];
-  $table.find("tbody > tr.rgRow, tbody > tr.rgAltRow").each((_, el) => {
+  $table.find("tbody > tr.rgRow, tbody > tr.rgAltRow, tr.rgRow, tr.rgAltRow").each((_, el) => {
     const tds = $(el).children("td");
     if (tds.length < 10) return;
     const offset = C.dataOffset(tds);
@@ -76,54 +79,52 @@ function parseDistRows(html) {
 
 function parseBranches(html) {
   const cheerio = require("cheerio");
-  const $ = cheerio.load(html);
+  const fragment = C.extractMasterTableHtml(html) || html;
+  const $ = cheerio.load(fragment);
   const rows = [];
-  $("table.rgMasterTable tbody > tr.rgRow, table.rgMasterTable tbody > tr.rgAltRow").each(
-    (_, el) => {
-      const tds = $(el).children("td");
-      if (tds.length < 6) return;
-      const offset = C.dataOffset(tds);
-      const storeA = tds.eq(offset + 9).find("a").first();
-      rows.push({
-        companyType: C.cellText(tds.eq(offset)),
-        distributorName: C.cellText(tds.eq(offset + 1)),
-        distributorType: C.cellText(tds.eq(offset + 2)),
-        name: C.cellText(tds.eq(offset + 3)),
-        branchType: C.cellText(tds.eq(offset + 4)),
-        province: C.cellText(tds.eq(offset + 5)),
-        city: C.cellText(tds.eq(offset + 6)),
-        address: C.cellText(tds.eq(offset + 7)),
-        technicalManager: C.cellText(tds.eq(offset + 8)),
-        storeListUrl: C.absUrl(storeA.attr("href")),
-        warehouses: [],
-      });
-    }
-  );
+  $("tr.rgRow, tr.rgAltRow").each((_, el) => {
+    const tds = $(el).children("td");
+    if (tds.length < 6) return;
+    const offset = C.dataOffset(tds);
+    const storeA = tds.eq(offset + 9).find("a").first();
+    rows.push({
+      companyType: C.cellText(tds.eq(offset)),
+      distributorName: C.cellText(tds.eq(offset + 1)),
+      distributorType: C.cellText(tds.eq(offset + 2)),
+      name: C.cellText(tds.eq(offset + 3)),
+      branchType: C.cellText(tds.eq(offset + 4)),
+      province: C.cellText(tds.eq(offset + 5)),
+      city: C.cellText(tds.eq(offset + 6)),
+      address: C.cellText(tds.eq(offset + 7)),
+      technicalManager: C.cellText(tds.eq(offset + 8)),
+      storeListUrl: C.absUrl(storeA.attr("href")),
+      warehouses: [],
+    });
+  });
   return rows;
 }
 
 function parseWarehouses(html) {
   const cheerio = require("cheerio");
-  const $ = cheerio.load(html);
+  const fragment = C.extractMasterTableHtml(html) || html;
+  const $ = cheerio.load(fragment);
   const rows = [];
-  $("table.rgMasterTable tbody > tr.rgRow, table.rgMasterTable tbody > tr.rgAltRow").each(
-    (_, el) => {
-      const tds = $(el).children("td");
-      if (tds.length < 4) return;
-      const offset = C.dataOffset(tds);
-      const name = C.cellText(tds.eq(offset));
-      if (!name) return;
-      rows.push({
-        name,
-        province: C.cellText(tds.eq(offset + 1)),
-        city: C.cellText(tds.eq(offset + 2)),
-        address: C.cellText(tds.eq(offset + 3)),
-        zone: C.cellText(tds.eq(offset + 4)),
-        postalCode: C.cellText(tds.eq(offset + 5)),
-        createdDate: C.cellText(tds.eq(offset + 6)),
-      });
-    }
-  );
+  $("tr.rgRow, tr.rgAltRow").each((_, el) => {
+    const tds = $(el).children("td");
+    if (tds.length < 4) return;
+    const offset = C.dataOffset(tds);
+    const name = C.cellText(tds.eq(offset));
+    if (!name) return;
+    rows.push({
+      name,
+      province: C.cellText(tds.eq(offset + 1)),
+      city: C.cellText(tds.eq(offset + 2)),
+      address: C.cellText(tds.eq(offset + 3)),
+      zone: C.cellText(tds.eq(offset + 4)),
+      postalCode: C.cellText(tds.eq(offset + 5)),
+      createdDate: C.cellText(tds.eq(offset + 6)),
+    });
+  });
   return rows;
 }
 
@@ -277,9 +278,11 @@ async function scrapeProvince(store, session, worker, province, startHtml, log) 
     saved += result.saved;
     linked += result.linked;
 
-    // کمک به GC: ارجاع‌های سنگین را قطع کن
+    // کمک به GC: ارجاع‌های سنگین را قطع کن؛ کش شعبه فقط برای همین صفحه لازم بود
     for (const row of rows) row.branches = null;
     rows = null;
+    for (const url of pageUrls) branchCache.delete(url);
+    if (global.gc) global.gc();
   }
 
   branchCache.clear();
