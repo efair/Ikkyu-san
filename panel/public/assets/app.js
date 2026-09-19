@@ -864,6 +864,17 @@
           doc.lastAudit && doc.lastAudit.siteCount != null ? fmtNum(doc.lastAudit.siteCount) : "—",
         ],
         ["شغل‌های انجام‌شده", `${fmtNum(doc.jobs.doneJobs)} / ${fmtNum(doc.jobs.recordedJobs)}`],
+        [
+          "پیشرفت این اجرا",
+          doc.progress && doc.progress.total
+            ? `رفته ${fmtNum(doc.progress.done || 0)} / ${fmtNum(doc.progress.total)} — مانده ${fmtNum(
+                doc.progress.remaining != null
+                  ? doc.progress.remaining
+                  : Math.max(0, (doc.progress.total || 0) - (doc.progress.done || 0))
+              )}`
+            : "—",
+        ],
+        ["بخش جاری", doc.progress && doc.progress.section],
         ["PID", doc.pid],
       ]) +
         (doc.url
