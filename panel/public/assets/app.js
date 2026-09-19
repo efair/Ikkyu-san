@@ -756,16 +756,29 @@
 
   function workerCard(item) {
     const p = item.progress || {};
-    const total = p.total || item.jobs.recordedJobs || 0;
-    const done = p.done || item.jobs.doneJobs || 0;
-    const remaining = p.remaining != null ? p.remaining : Math.max(0, total - done);
+    // وقتی ورکر زنده است فقط progress لحظه‌ای را نشان بده؛
+    // وگرنه done=0 به‌اشتباه با doneJobs جایگزین می‌شد و «مانده ۰» جعلی می‌ساخت.
+    const live = item.running && Boolean(p.section || p.updatedAt || p.label || p.detected != null);
+    const total = live
+      ? Number(p.total || 0)
+      : Number(p.total != null ? p.total : item.jobs.recordedJobs || 0);
+    const done = live
+      ? Number(p.done || 0)
+      : Number(p.done != null ? p.done : item.jobs.doneJobs || 0);
+    const remaining = live
+      ? Number(p.remaining != null ? p.remaining : Math.max(0, total - done))
+      : Math.max(0, total - done);
     const bar = item.running
-      ? pct(done, total)
+      ? live
+        ? pct(done, total)
+        : 0
       : item.lastAudit
         ? pct(item.localCount, item.lastAudit.siteCount || item.localCount)
         : pct(item.jobs.doneJobs, item.jobs.recordedJobs);
-    const progressLine = item.running && total
-      ? `رفته ${fmtNum(done)} / ${fmtNum(total)}${p.label ? " " + p.label : ""} — مانده ${fmtNum(remaining)}`
+    const progressLine = item.running
+      ? live
+        ? `رفته ${fmtNum(done)} / ${fmtNum(total)}${p.label ? " " + p.label : ""} — مانده ${fmtNum(remaining)}`
+        : "در حال اجرا — وضعیت لحظه‌ای وصل نیست"
       : "";
     return `<article class="worker-card" data-worker="${item.id}">
       <header>
